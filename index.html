@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SUPERVECTAR TV ESPAÑA</title>
+
+  <!-- Video.js CSS -->
+  <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+
+  <style>
+    body{
+      font-family:system-ui;
+      margin:0;
+      padding:16px;
+      display:grid;
+      gap:12px;
+      grid-template-columns: 340px 1fr;
+      height:100vh;
+      box-sizing:border-box;
+      background:#121212;
+      color:#f7eb02;
+    }
+    header{
+      grid-column:1/-1; 
+      display:flex; 
+      align-items:center; 
+      gap:12px;
+    }
+    header img.logo {
+      width: 40px;
+      height: 40px;
+      object-fit: contain;
+      border-radius: 6px;
+    }
+    h1{font-size:20px; margin:0;}
+    .left{
+      overflow:auto; 
+      border:1px solid #333; 
+      padding:8px; 
+      border-radius:8px; 
+      background:#1e1e1e;
+    }
+    .search{margin-bottom:8px;}
+    ul.channel-list{list-style:none; padding:0; margin:0;}
+    li.channel{padding:6px; border-bottom:1px solid #333;}
+    li.channel:hover{background:#2a2a2a;}
+    li.channel.active{background:#333;}
+    li.channel.active .channel-title{color:#4caf50;}
+    button.active-btn{background:#4caf50 !important;}
+    .title-line{display:flex; align-items:center; gap:6px; justify-content:space-between;}
+    .channel-info{display:flex; align-items:center; gap:6px; flex:1;}
+    .channel-info img{width:26px; height:26px; object-fit:contain; border-radius:4px; background:#333;}
+    .channel-title{font-size:14px; flex:1;}
+    .group-header{
+      font-weight:600;
+      padding:6px;
+      margin-top:6px;
+      background:#2b2b2b;
+      border-radius:6px;
+      cursor:pointer;
+      user-select:none;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .group-header:hover{background:#3a3a3a;}
+    .group-channels{margin:0; padding-left:0; display:none;}
+    .group-channels.open{display:block;}
+    .right{display:flex; flex-direction:column; gap:12px;}
+    .video-container{width:100%; height:80vh;}
+    .video-js{width:100%; height:100%; border-radius:12px;}
+    .note{font-size:13px; color:#aaa;}
+    .error{color:#ff5252}
+    footer{grid-column:1/-1; font-size:13px; color:#888;}
+  </style>
+
+  <!-- Video.js JS -->
+  <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+</head>
+<body>
+  <header>
+    <img src="https://i.ibb.co/Fqd6hNjF/tv.png" alt="Logo" class="logo" />
+    <h1>SUPERVECTAR TV ESPAÑA</h1>
+  </header>
+
+  <div class="left">
+    <div class="search">
+      <input id="filter" type="text" placeholder="Buscar canales..." />
+    </div>
+    <div id="groups"></div>
+  </div>
+
+  <div class="right">
+    <div>
+      <div id="current-title" style="font-weight:700; font-size:16px;">→ Selecciona un canal</div>
+      <div class="note" id="current-info"></div>
+    </div>
+    <div class="video-container">
+      <video id="player" class="video-js vjs-big-play-centered vjs-default-skin" controls preload="auto"></video>
+    </div>
+    <div>
+      <div id="status" class="note">Estado: listo</div>
+      <div id="error" class="error" style="display:none"></div>
+    </div>
+  </div>
+
+  <footer>
+    SUPERVECTAR TV ESPAÑA.
+  </footer>
+
+<script>
+(async function(){
+  const defaultM3U = 'https://raw.githubusercontent.com/supervectar-coder/tdtespa-a/refs/heads/main/tvtdtespa%C3%B1a.m3u';
+  const groupsContainer = document.getElementById('groups');
+  const player = videojs('player'); 
+  const currentTitle = document.getElementById('current-title');
+  const currentInfo = document.getElementById('current-info');
+  const status = document.getElementById('status');
+  const errorBox = document.getElementById('error');
+  const filterInput = document.getElementById('filter');
+
+  let currentPlaylist = [];
+  let activeButton = null;
+  let activeLi = null;
+
+  function parseM3U(text){
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+    const items = [];
+    let lastInfo = null;
+    for (let line of lines){
+      if (line.startsWith('#EXTINF')) lastInfo = line;
+      else if (!line.startsWith('#')){
+        let title = line;
+        let logo = null;
+        let group = "Otros";
+        if (lastInfo){
+          const commaIdx = lastInfo.indexOf(',');
+          if (commaIdx !== -1) title = lastInfo.slice(commaIdx+1).trim() || title;
+          const matchLogo = lastInfo.match(/tvg-logo="([^"]+)"/i);
+          if (matchLogo) logo = matchLogo[1];
+          const matchGroup = lastInfo.match(/group-title="([^"]+)"/i);
+          if (matchGroup) group = matchGroup[1];
+        }
+        items.push({title, url: line, logo, group});
+        lastInfo = null;
+      }
+    }
+    return items;
+  }
+
+  function renderGroups(items, filter=''){
+    groupsContainer.innerHTML = '';
+    const f = filter.toLowerCase();
+    const grouped = {};
+    items.forEach(it=>{
+      if (f && !it.title.toLowerCase().includes(f)) return;
+      if (!grouped[it.group]) grouped[it.group] = [];
+      grouped[it.group].push(it);
+    });
+
+    Object.keys(grouped).sort().forEach(groupName=>{
+      const header = document.createElement('div');
+      header.className = 'group-header';
+      header.textContent = groupName;
+      const arrow = document.createElement('span');
+      arrow.textContent = "▼";
+      header.appendChild(arrow);
+
+      const ul = document.createElement('ul');
+      ul.className = 'group-channels';
+
+      grouped[groupName].forEach(it=>{
+        const li = document.createElement('li');
+        li.className = 'channel';
+        const div = document.createElement('div');
+        div.className = 'title-line';
+
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'channel-info';
+        if(it.logo){
+          const img = document.createElement('img');
+          img.src = it.logo;
+          infoDiv.appendChild(img);
+        }
+        const span = document.createElement('div');
+        span.className = 'channel-title';
+        span.textContent = it.title;
+        infoDiv.appendChild(span);
+        div.appendChild(infoDiv);
+
+        const playBtn = document.createElement('button');
+        playBtn.textContent = "▶";
+        playBtn.onclick = ()=>playStream(it, playBtn, li);
+        div.appendChild(playBtn);
+
+        li.appendChild(div);
+        ul.appendChild(li);
+      });
+
+      header.onclick = ()=>{
+        ul.classList.toggle('open');
+        arrow.textContent = ul.classList.contains('open') ? "▲" : "▼";
+      };
+
+      groupsContainer.appendChild(header);
+      groupsContainer.appendChild(ul);
+    });
+  }
+
+  function playStream(item, btn, li){
+    if(activeButton) activeButton.classList.remove('active-btn');
+    if(activeLi) activeLi.classList.remove('active');
+
+    btn.classList.add('active-btn');
+    li.classList.add('active');
+    activeButton = btn;
+    activeLi = li;
+
+    currentTitle.textContent = item.title;
+    currentInfo.textContent = "Stream activo";
+    errorBox.style.display = 'none';
+    status.textContent = "Reproduciendo...";
+    player.src({ src: item.url, type: "application/x-mpegURL" });
+    player.play().catch(()=> status.textContent = "Error de reproducción (quizá CORS o stream no soportado)");
+  }
+
+  filterInput.oninput = ()=>renderGroups(currentPlaylist, filterInput.value);
+
+  async function loadM3U(url){
+    try{
+      const resp = await fetch(url);
+      const text = await resp.text();
+      currentPlaylist = parseM3U(text);
+      renderGroups(currentPlaylist);
+      status.textContent = "Lista cargada: "+currentPlaylist.length+" canales";
+    }catch(e){
+      status.textContent = "Error al cargar lista";
+      errorBox.style.display="block";
+      errorBox.textContent = e.message;
+    }
+  }
+
+  // Cargar lista por defecto al iniciar
+  loadM3U(defaultM3U);
+})();
+</script>
+</body>
+</html>
